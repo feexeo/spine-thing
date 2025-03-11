@@ -79,6 +79,12 @@
     "typescript-eslint": "^8.24.1",
     "vite": "^6.2.0"
   },
+  "lint-staged": {
+    "./**/*.{js,jsx,ts,tsx}": [
+      "pnpm prettier --write",
+      "pnpm eslint --fix --quiet"
+    ]
+  },
   "prettier": {
     "printWidth": 80,
     "tabWidth": 2,
