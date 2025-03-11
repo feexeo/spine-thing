@@ -54,7 +54,7 @@ export const AppSidebar: React.FC<SpineControls> = (controls) => {
     <SidebarProvider>
       <Sidebar variant="sidebar" collapsible="icon">
         <SidebarContent>
-          <SidebarGroup className="flex-row p-0">
+          <SidebarGroup className="flex-row overflow-hidden p-0">
             <SidebarGroupContent className="w-12 p-2">
               <SidebarMenu className="w-12 items-start">
                 {items.map((item) => (
