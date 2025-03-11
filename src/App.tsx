@@ -1,44 +1,40 @@
-import reactLogo from "./assets/react.svg";
+import { useCallback } from "react";
+
 import { AppSidebar } from "./components/ui/app-sidebar";
-import { SidebarProvider } from "./components/ui/sidebar";
-import { getSidebarCookie } from "./lib/cookies";
-import viteLogo from "/vite.svg";
+import Loading from "./components/ui/loading";
+import { Toaster } from "./components/ui/sonner";
+import useSpine from "./hooks/use-pixi-spine";
+import { cn } from "./lib/utils";
+import { useSpineStore } from "./store/spine-store";
 
 function App() {
-  const { state, activeItem } = getSidebarCookie();
+  const spine = useSpineStore((state) => state.spine);
+  const isExporting = useSpineStore((state) => state.isLoading);
+  const { setCanvaState, bindGestures, ...controls } = useSpine(spine);
+
+  const setCanvasRef = useCallback(
+    (node: HTMLCanvasElement | null) => {
+      if (node) setCanvaState(node);
+    },
+    [setCanvaState],
+  );
+
   return (
-    <SidebarProvider defaultOpen={state} defaultActiveItem={activeItem}>
-      <AppSidebar />
-      <main className="flex size-full h-screen items-center justify-center bg-gray-950 text-white">
-        <section className="flex flex-col items-center gap-6 rounded-2xl bg-gray-900 p-8 shadow-xl">
-          <header className="flex items-center gap-6">
-            <a
-              href="https://vite.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <img
-                src={viteLogo}
-                className="h-20 transition-transform duration-300 hover:scale-110"
-                alt="Vite logo"
-              />
-            </a>
-            <a
-              href="https://react.dev"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <img
-                src={reactLogo}
-                className="h-20 transition-transform duration-300 hover:scale-110"
-                alt="React logo"
-              />
-            </a>
-          </header>
-          <h1 className="text-5xl font-bold tracking-tight">Vite + React</h1>
-        </section>
+    <>
+      <AppSidebar {...controls} />
+      <main className="h-screen w-screen">
+        <canvas
+          {...bindGestures()}
+          ref={setCanvasRef}
+          className={cn("size-full", isExporting ? "invisible" : "visible")}
+          style={{ backgroundColor: "transparent" }}
+        />
+        {isExporting && (
+          <Loading variant="dots" size="lg" message="Exporting" />
+        )}
       </main>
-    </SidebarProvider>
+      <Toaster />
+    </>
   );
 }
 
