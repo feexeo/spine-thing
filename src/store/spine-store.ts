@@ -1,6 +1,8 @@
-import { ISkeletonData, Spine } from "pixi-spine";
-import { Assets } from "pixi.js";
+import { ISkeletonData, Spine, TextureAtlas } from "pixi-spine";
+import { ALPHA_MODES, BaseTexture } from "pixi.js";
 import { create } from "zustand";
+
+import { SpineLoader } from "@/lib/spine-loader";
 
 export type SpineUrls = {
   atlasUrl: string | null;
@@ -49,10 +51,13 @@ export const useSpineStore = create<SpineState>((set, get) => ({
   setSpine: (spine) => set({ spine }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
-  setPremultipliedAlpha: (value) =>
+  setPremultipliedAlpha: (value) => {
     set({
       premultipliedAlpha: value,
-    }),
+    });
+    const { loadSpineAnimation } = get();
+    void loadSpineAnimation();
+  },
   setUrls: (urls) =>
     set((state) => ({
       urls: { ...state.urls, ...urls },
@@ -74,42 +79,53 @@ export const useSpineStore = create<SpineState>((set, get) => ({
     }),
 
   loadSpineAnimation: async () => {
-    const { urls, premultipliedAlpha } = get();
+    const { urls, premultipliedAlpha, files } = get();
     const { atlasUrl, imageUrl, jsonUrl } = urls;
+    const { atlasFile, jsonFile } = files;
 
-    if (!atlasUrl || !imageUrl || !jsonUrl) {
+    if (!atlasUrl || !imageUrl || !jsonUrl || !atlasFile || !jsonFile) {
       return;
     }
-
+    let skeletonData: ISkeletonData;
     set({ isLoading: false, error: null });
 
-    const manifest = {
-      bundles: [
-        {
-          name: "spineAnimation",
-          assets: [
-            {
-              name: "spineAnimation",
-              srcs: jsonUrl,
-              data: {
-                image: imageUrl,
-                spineAtlasFile: atlasUrl,
-                premultipliedAlpha,
-              },
-            },
-          ],
-        },
-      ],
-    };
-
     try {
-      Assets.reset();
-      await Assets.init({ manifest });
-      const assetBundle = (await Assets.loadBundle("spineAnimation")) as {
-        spineAnimation: { spineData: ISkeletonData };
-      };
-      const spineData = assetBundle.spineAnimation.spineData;
-      const spine = new Spine(spineData);
+      const spineLoader = new SpineLoader();
+      const atlasText = await atlasFile.text();
+      const dataToParse = new Uint8Array(await jsonFile.arrayBuffer());
+      const texturedAtlas = new TextureAtlas(
+        atlasText,
+        (_, callback: (tex: BaseTexture) => BaseTexture) => {
+          BaseTexture.removeFromCache(imageUrl);
+
+          callback(
+            BaseTexture.from(imageUrl, {
+              alphaMode: premultipliedAlpha
+                ? ALPHA_MODES.PREMULTIPLIED_ALPHA
+                : ALPHA_MODES.NO_PREMULTIPLIED_ALPHA,
+            }),
+          );
+        },
+      );
+      if (jsonUrl.endsWith(".skel")) {
+        const spineResource = spineLoader.parseData(
+          spineLoader.createBinaryParser(),
+          texturedAtlas,
+          dataToParse,
+        );
+
+        skeletonData = spineResource.spineData;
+      } else {
+        const spineResource = spineLoader.parseData(
+          spineLoader.createJsonParser(),
+          texturedAtlas,
+          dataToParse,
+        );
+        skeletonData = spineResource.spineData;
+      }
+
+      const spine = new Spine(skeletonData);
+
       set({ spine, isLoading: false });
     } catch (error) {
       console.error("Error loading Spine data:", error);
