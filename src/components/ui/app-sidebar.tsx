@@ -102,9 +102,9 @@ const SidebarItemContent: React.FC<SpineControls> = (controls) => {
           <div className="via-border mb-2 h-[1px] w-full bg-gradient-to-r from-transparent to-transparent" />
         </div>
         <div className="flex-1 overflow-hidden">
-          <div className="h-full p-1">
+          <div className="h-screen p-1">
             {item ? (
-              <div className="h-full overflow-hidden">
+              <div className="h-screen overflow-hidden">
                 <item.panel {...controls} />
               </div>
             ) : null}

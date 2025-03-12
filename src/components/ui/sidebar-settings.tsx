@@ -107,7 +107,7 @@ const SpineControlPanel: React.FC<SpineControls> = (controls) => {
           await controls.exportToVideo("webm", options);
           break;
         case "screenshot":
-          await controls.takeScreenshot();
+          await controls.takeScreenshot(options);
           break;
       }
     } catch (error) {

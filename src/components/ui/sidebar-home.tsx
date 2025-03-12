@@ -246,9 +246,6 @@ export const SpineFileUploader: React.FC = () => {
           checked={premultipliedAlpha}
           onCheckedChange={(checked) => {
             setPremultipliedAlpha(checked === true);
-            if (urls.atlasUrl && urls.imageUrl && urls.jsonUrl) {
-              void loadSpineAnimation();
-            }
           }}
         />
         <label htmlFor="premultipliedAlpha" className="text-xs">
