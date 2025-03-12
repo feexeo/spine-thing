@@ -38,7 +38,7 @@ export type UseSpine = {
   scale: PIXI.ObservablePoint<unknown> | undefined;
   setCanvaState: React.Dispatch<React.SetStateAction<HTMLCanvasElement | null>>;
   bindGestures: (...args: unknown[]) => ReactDOMAttributes;
-  takeScreenshot: () => Promise<void>;
+  takeScreenshot: (options?: ExportOptions) => Promise<void>;
   exportToVideo: (
     format: VideoFormat,
     options?: ExportOptions,
@@ -504,44 +504,61 @@ const useSpine = (spine: Spine | null): UseSpine => {
   /**
    * Takes a screenshot of the current animation frame
    */
-  const takeScreenshot = useCallback(() => {
-    const spine = spineAnimationRef.current;
-    if (!spine) return Promise.resolve();
+  const takeScreenshot = useCallback(
+    (options?: { height?: number }) => {
+      const spine = spineAnimationRef.current;
+      if (!spine) return Promise.resolve();
 
-    return withExportSetup((spine) => {
-      return Promise.resolve().then(() => {
-        try {
-          const bounds = spine.getLocalBounds();
-          spine.position.set(-bounds.x, -bounds.y);
+      return withExportSetup((spine) => {
+        return Promise.resolve().then(() => {
+          try {
+            const maxBounds = calculateMaxAnimationBounds();
+            const originalWidth = maxBounds.width;
+            const originalHeight = maxBounds.height;
+            const { width, height } = calculateExportDimensions(
+              originalWidth,
+              originalHeight,
+              options?.height,
+            );
+            const scale = height / originalHeight;
 
-          const renderer = new PIXI.Renderer({
-            width: bounds.width,
-            height: bounds.height,
-            backgroundAlpha: 0,
-            antialias: true,
-            preserveDrawingBuffer: true,
-          });
+            const renderer = new PIXI.Renderer({
+              width,
+              height,
+              backgroundAlpha: 0,
+              antialias: true,
+              preserveDrawingBuffer: true,
+            });
 
-          renderer.render(spine);
-          const canvas = renderer.view;
+            spine.position.set(-maxBounds.x * scale, -maxBounds.y * scale);
+            spine.scale.set(scale);
 
-          if (!(canvas instanceof HTMLCanvasElement)) {
-            throw new Error("Renderer's view is not a canvas element");
+            renderer.render(spine);
+            const canvas = renderer.view;
+
+            if (!(canvas instanceof HTMLCanvasElement)) {
+              throw new Error("Renderer's view is not a canvas element");
+            }
+
+            const png = canvas.toDataURL("image/png");
+            downloadFile(
+              png,
+              `${animationStateRef.current.currentAnimationName}.png`,
+            );
+            renderer.destroy();
+          } catch (error) {
+            console.error("Failed to capture screenshot:", error);
           }
-
-          const png = canvas.toDataURL("image/png");
-
-          downloadFile(
-            png,
-            `${animationStateRef.current.currentAnimationName}.png`,
-          );
-          renderer.destroy();
-        } catch (error) {
-          console.error("Failed to capture screenshot:", error);
-        }
+        });
       });
-    });
-  }, [downloadFile, withExportSetup]);
+    },
+    [
+      withExportSetup,
+      calculateMaxAnimationBounds,
+      calculateExportDimensions,
+      downloadFile,
+    ],
+  );
 
   /**
    * Exports the animation to a video file with support for custom height
@@ -552,6 +569,7 @@ const useSpine = (spine: Spine | null): UseSpine => {
       if (!spine || !spine.state.tracks[0]) return;
 
       return withExportSetup(async (spine) => {
+        const exportContainer = new PIXI.Container();
         try {
           if (format === "mp4") {
             console.warn(
@@ -576,9 +594,10 @@ const useSpine = (spine: Spine | null): UseSpine => {
 
           // Calculate scale based on target height
           const scale = height / originalHeight;
+          exportContainer.addChild(spine);
 
           // Add slight padding to ensure animation stays in frame
-          const paddingFactor = 0.02;
+          const paddingFactor = 0.05;
           const paddedWidth = Math.ceil(width * (1 + paddingFactor));
           const paddedHeight = Math.ceil(height * (1 + paddingFactor));
           const paddingX = Math.floor((paddedWidth - width) / 2);
@@ -617,7 +636,6 @@ const useSpine = (spine: Spine | null): UseSpine => {
             mimeType: MediaRecorder.isTypeSupported(mimeType)
               ? mimeType
               : "video/webm",
-
             videoBitsPerSecond: 5000000, // 5Mbps
           });
 
@@ -642,54 +660,90 @@ const useSpine = (spine: Spine | null): UseSpine => {
           // Start recording
           recorder.start();
 
-          // Total frames to capture the entire animation
-          const totalFrames = Math.max(2, Math.ceil(duration * FPS));
+          const startTime = performance.now();
+          const animationDurationMs = duration * 1000;
+          let lastFrameTime = 0;
 
-          // Render all frames
-          for (let i = 0; i < totalFrames; i++) {
-            const time = (i / totalFrames) * duration;
-
-            // Update animation time
-            spine.state.tracks[0].trackTime = time;
-            spine.updateTransform();
-
-            // Scale and position spine for export with padding
-            spine.scale.set(scale, scale);
-            spine.position.set(
-              -maxBounds.x * scale + paddingX,
-              -maxBounds.y * scale + paddingY,
+          const renderFrame = () => {
+            const elapsed = Math.min(
+              performance.now() - startTime,
+              animationDurationMs,
             );
+            const currentTime = (elapsed / animationDurationMs) * duration;
 
-            // Clear the renderer and render the frame
-            renderer.clear();
-            renderer.render(spine);
+            // Update animation state using precise elapsed time
+            spine.state.tracks[0].trackTime = currentTime;
+            if (appRef.current) {
+              appRef.current.ticker.update();
+            }
 
-            // Clear the output canvas
-            ctx.clearRect(0, 0, width, height);
+            // Calculate target frame time based on animation duration
+            const targetFrameTime = (elapsed / animationDurationMs) * duration;
 
-            // Draw the rendered spine animation (cropped to remove padding)
-            ctx.drawImage(
-              renderer.view as HTMLCanvasElement,
-              paddingX,
-              paddingY,
-              width,
-              height,
-              0,
-              0,
-              width,
-              height,
-            );
+            // Only capture frame if we've passed the required frame interval
+            if (targetFrameTime >= lastFrameTime + 1 / FPS) {
+              // Scale and position spine for export with padding
+              spine.scale.set(scale, scale);
+              spine.position.set(
+                -maxBounds.x * scale + paddingX,
+                -maxBounds.y * scale + paddingY,
+              );
 
-            // Wait for next frame timing
-            await new Promise((resolve) => setTimeout(resolve, 1000 / FPS));
-          }
+              // Clear the renderer and render the frame
+              renderer.clear();
+              renderer.render(exportContainer);
 
-          // Stop recording after all frames are rendered
-          recorder.stop();
+              // Clear the output canvas
+              ctx.clearRect(0, 0, width, height);
+
+              // Draw the rendered spine animation (cropped to remove padding)
+              ctx.drawImage(
+                renderer.view as HTMLCanvasElement,
+                paddingX,
+                paddingY,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+              );
+
+              // Update last captured frame time
+              lastFrameTime = targetFrameTime;
+            }
+
+            if (elapsed < animationDurationMs) {
+              requestAnimationFrame(renderFrame);
+            } else {
+              // Final frame to ensure complete duration
+              ctx.drawImage(
+                renderer.view as HTMLCanvasElement,
+                paddingX,
+                paddingY,
+                width,
+                height,
+                0,
+                0,
+                width,
+                height,
+              );
+
+              recorder.stop();
+              void recordingFinished.then(() => renderer.destroy());
+            }
+          };
+
+          // Start rendering loop
+          renderFrame();
+
+          // Wait for recording to finish
           await recordingFinished;
-          renderer.destroy();
         } catch (error) {
           console.error(`Failed to export to ${format}:`, error);
+        } finally {
+          appRef.current?.stage.addChild(spine);
+          exportContainer.destroy({ children: false });
         }
       });
     },
@@ -702,17 +756,20 @@ const useSpine = (spine: Spine | null): UseSpine => {
   );
 
   /**
-   * Exports the animation to a GIF file
+   * Exports the animation to a GIF file with proper transparency
    */
   const exportToGif = useCallback(
-    async (options?: { height?: number }) => {
+    async (options?: ExportOptions): Promise<void> => {
       const spine = spineAnimationRef.current;
       if (!spine || !spine.state.tracks[0]) return;
 
-      return withExportSetup(async (spine) => {
+      return await withExportSetup(async (spine) => {
+        const exportContainer = new PIXI.Container();
         try {
           const trackEntry = spine.state.tracks[0];
           const duration = getAnimationDuration(trackEntry);
+
+          // Reduce frames to ensure GIF generation completes
           const FPS = 20;
           const totalFrames = Math.ceil(duration * FPS);
 
@@ -727,16 +784,18 @@ const useSpine = (spine: Spine | null): UseSpine => {
             originalHeight,
             options?.height,
           );
-          const scale = height / originalHeight; // Calculate scale based on target height
+          const scale = height / originalHeight;
 
-          // Add slight padding to allow for better edge processing
-          const paddingFactor = 0.02;
+          exportContainer.addChild(spine);
+
+          // Add padding to avoid clipping and provide buffer for edge processing
+          const paddingFactor = 0.05;
           const paddedWidth = Math.ceil(width * (1 + paddingFactor));
           const paddedHeight = Math.ceil(height * (1 + paddingFactor));
           const paddingX = Math.floor((paddedWidth - width) / 2);
           const paddingY = Math.floor((paddedHeight - height) / 2);
 
-          // Create temporary renderer with padding
+          // Create temporary renderer
           const renderer = new PIXI.Renderer({
             width: paddedWidth,
             height: paddedHeight,
@@ -745,48 +804,50 @@ const useSpine = (spine: Spine | null): UseSpine => {
             preserveDrawingBuffer: true,
           });
 
-          const chromaKey = "0x00ff00";
-
+          // Optimize GIF.js configuration
           const gif = new GIF({
-            workers: 4,
+            workers: 2, // Reduced from 4 to prevent memory issues
             quality: 10,
             width,
             height,
             workerScript: GIF_WORKER_URL,
-            transparent: chromaKey,
+            transparent: "#00FF99",
+            // disposal: 2,
             dither: false,
+            debug: true, // Enable debug to get more information
           });
 
-          // Pre-render all frames
-          const frames: ImageData[] = [];
+          // Create a work canvas for frame processing
           const frameCanvas = document.createElement("canvas");
           const frameCtx = frameCanvas.getContext("2d", {
             willReadFrequently: true,
+            alpha: true,
           })!;
           frameCanvas.width = width;
           frameCanvas.height = height;
 
-          // Prepare frame capture function with precise chroma key handling
-          const captureFrame = (time: number) => {
+          // Prepare frames in smaller batches to avoid memory pressure
+
+          for (let i = 0; i < totalFrames; i++) {
+            const time = (i / (totalFrames - 1)) * duration;
             spine.state.tracks[0].trackTime = time;
             spine.updateTransform();
 
-            // Scale and position spine for export with padding
+            // Scale and position spine with padding
             spine.scale.set(scale, scale);
             spine.position.set(
               -maxBounds.x * scale + paddingX,
               -maxBounds.y * scale + paddingY,
             );
 
-            // Clear the renderer and render the frame
+            // Clear renderer and render the frame
             renderer.clear();
-            renderer.render(spine);
+            renderer.render(exportContainer);
 
-            // Fill with chroma key green
-            frameCtx.fillStyle = chromaKey;
-            frameCtx.fillRect(0, 0, width, height);
+            // Clear canvas with transparency
+            frameCtx.clearRect(0, 0, width, height);
 
-            // Draw the rendered spine animation (cropped to remove padding)
+            // Draw the rendered spine animation
             frameCtx.drawImage(
               renderer.view as HTMLCanvasElement,
               paddingX,
@@ -799,72 +860,39 @@ const useSpine = (spine: Spine | null): UseSpine => {
               height,
             );
 
-            // Get the image data for processing
+            // Process transparency
             const imageData = frameCtx.getImageData(0, 0, width, height);
             const data = imageData.data;
 
-            // Careful edge processing that preserves black pixels
-            for (let i = 0; i < data.length; i += 4) {
-              const r = data[i];
-              const g = data[i + 1];
-              const b = data[i + 2];
-              const a = data[i + 3];
+            for (let j = 0; j < data.length; j += 4) {
+              const r = data[j];
+              const g = data[j + 1];
+              const b = data[j + 2];
+              const a = data[j + 3];
 
-              // Adjust only pixels with strong green bleeding at edges
-              // This avoids affecting black pixels (like eyelashes)
-              if (a > 0 && g > 180 && g > r * 1.5 && g > b * 1.5) {
-                // Check if this is a pure green pixel (part of the background)
-                const isChromaKey = r < 50 && g > 240 && b < 50;
+              if (a === 0) continue;
 
-                if (isChromaKey) {
-                  // Make chroma key pixels fully transparent
-                  data[i + 3] = 0;
-                } else {
-                  // For edge pixels with green bleeding
-                  // 1. Reduce the green component
-                  // 2. Maintain dark pixels by checking luminance
-                  const luminance = r * 0.299 + g * 0.587 + b * 0.114;
-
-                  // Preserve very dark pixels (like eyelashes)
-                  if (luminance < 40 && r < 30 && b < 30) {
-                    // Keep dark pixels but remove green tint
-                    data[i + 1] = Math.min(data[i + 1], Math.max(r, b));
-                  } else {
-                    // Reduce green bleeding on other edge pixels
-                    const avgColor = (r + b) / 2;
-                    data[i + 1] = Math.min(g, avgColor * 1.2);
-                  }
+              if (a < 250) {
+                const avgColor = (r + b) / 2;
+                if (g > avgColor * 1.2) {
+                  data[j + 1] = Math.min(g, avgColor * 1.1);
                 }
+              }
+
+              const brightness = r * 0.299 + g * 0.587 + b * 0.114;
+              if (brightness < 30 && a < 240) {
+                data[j + 3] = 0;
               }
             }
 
-            return imageData;
-          };
+            frameCtx.putImageData(imageData, 0, 0);
 
-          // First pass: generate all frames to ensure consistency
-          for (let i = 0; i < totalFrames; i++) {
-            const time = (i / (totalFrames - 1)) * duration;
-            const imageData = captureFrame(time);
-            frames.push(imageData);
-
-            // Yield to main thread periodically
-            if (i % 10 === 0) {
-              await new Promise((resolve) => setTimeout(resolve, 0));
-            }
-          }
-
-          // Second pass: add frames to GIF
-          for (let i = 0; i < frames.length; i++) {
-            gif.addFrame(frames[i], {
+            // Add the frame directly to avoid memory issues with image objects
+            gif.addFrame(frameCanvas, {
               delay: 1000 / FPS,
-              // Fix the dispose/disposal error - GIF.js uses 'dispose'
+              copy: true,
               dispose: 2,
             });
-
-            // Yield to main thread periodically
-            if (i % 20 === 0) {
-              await new Promise((resolve) => setTimeout(resolve, 0));
-            }
           }
 
           // Finalize GIF
@@ -878,12 +906,17 @@ const useSpine = (spine: Spine | null): UseSpine => {
               URL.revokeObjectURL(url);
               resolve();
             });
+
             gif.render();
           });
 
           renderer.destroy();
         } catch (error) {
-          console.error("Failed to export GIF:", error);
+          console.error("Error generating GIF:", error);
+          throw new Error("Failed to generate GIF");
+        } finally {
+          appRef.current?.stage.addChild(spine);
+          exportContainer.destroy({ children: false });
         }
       });
     },
