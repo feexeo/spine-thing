@@ -2,6 +2,7 @@ import { useCallback } from "react";
 
 import { AppSidebar } from "./components/ui/app-sidebar";
 import Loading from "./components/ui/loading";
+import { SidebarTrigger } from "./components/ui/sidebar";
 import { Toaster } from "./components/ui/sonner";
 import useSpine from "./hooks/use-pixi-spine";
 import { cn } from "./lib/utils";
@@ -21,6 +22,7 @@ function App() {
 
   return (
     <>
+      <SidebarTrigger className="absolute top-0 left-0 p-8 md:hidden" />
       <AppSidebar {...controls} />
       <main className="h-screen w-screen">
         <canvas
