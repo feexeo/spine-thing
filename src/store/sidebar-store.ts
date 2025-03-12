@@ -27,7 +27,7 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
     (set, get) => ({
       open: true,
       openMobile: false,
-      activeItem: undefined,
+      activeItem: "Home",
       isMobile: false,
 
       setOpen: (open) => {
@@ -80,7 +80,6 @@ export const useSidebarStore = create<SidebarState & SidebarActions>()(
       name: "sidebar-store",
       partialize: (state) => ({
         open: state.open,
-        activeItem: state.activeItem,
       }),
     },
   ),
