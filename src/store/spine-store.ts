@@ -1,8 +1,6 @@
 import { ISkeletonData, Spine, TextureAtlas } from "pixi-spine";
-import { ALPHA_MODES, BaseTexture } from "pixi.js";
+import { ALPHA_MODES, Assets, BaseTexture } from "pixi.js";
 import { create } from "zustand";
-
-import { SpineLoader } from "@/lib/spine-loader";
 
 export type SpineUrls = {
   atlasUrl: string | null;
@@ -86,46 +84,49 @@ export const useSpineStore = create<SpineState>((set, get) => ({
     if (!atlasUrl || !imageUrl || !jsonUrl || !atlasFile || !jsonFile) {
       return;
     }
-    let skeletonData: ISkeletonData;
+    const atlasText = await atlasFile.text();
+
     set({ isLoading: false, error: null });
 
-    try {
-      const spineLoader = new SpineLoader();
-      const atlasText = await atlasFile.text();
-      const dataToParse = new Uint8Array(await jsonFile.arrayBuffer());
-      const texturedAtlas = new TextureAtlas(
-        atlasText,
-        (_, callback: (tex: BaseTexture) => BaseTexture) => {
-          BaseTexture.removeFromCache(imageUrl);
+    const texturedAtlas = new TextureAtlas(
+      atlasText,
+      (_, callback: (tex: BaseTexture) => BaseTexture) => {
+        BaseTexture.removeFromCache(imageUrl);
 
-          callback(
-            BaseTexture.from(imageUrl, {
-              alphaMode: premultipliedAlpha
-                ? ALPHA_MODES.PREMULTIPLIED_ALPHA
-                : ALPHA_MODES.NO_PREMULTIPLIED_ALPHA,
-            }),
-          );
+        callback(
+          BaseTexture.from(imageUrl, {
+            alphaMode: premultipliedAlpha
+              ? ALPHA_MODES.PREMULTIPLIED_ALPHA
+              : ALPHA_MODES.NO_PREMULTIPLIED_ALPHA,
+          }),
+        );
+      },
+    );
+
+    const manifest = {
+      bundles: [
+        {
+          name: "spineAnimation",
+          assets: [
+            {
+              name: "spineAnimation",
+              srcs: jsonUrl,
+              data: {
+                spineAtlas: texturedAtlas,
+              },
+            },
+          ],
         },
-      );
-      if (jsonUrl.endsWith(".skel")) {
-        const spineResource = spineLoader.parseData(
-          spineLoader.createBinaryParser(),
-          texturedAtlas,
-          dataToParse,
-        );
-
-        skeletonData = spineResource.spineData;
-      } else {
-        const spineResource = spineLoader.parseData(
-          spineLoader.createJsonParser(),
-          texturedAtlas,
-          dataToParse,
-        );
-        skeletonData = spineResource.spineData;
-      }
-
-      const spine = new Spine(skeletonData);
-
+      ],
+    };
+    try {
+      Assets.reset();
+      await Assets.init({ manifest });
+      const assetBundle = (await Assets.loadBundle("spineAnimation")) as {
+        spineAnimation: { spineData: ISkeletonData };
+      };
+      const spineData = assetBundle.spineAnimation.spineData;
+      const spine = new Spine(spineData);
       set({ spine, isLoading: false });
     } catch (error) {
       console.error("Error loading Spine data:", error);
