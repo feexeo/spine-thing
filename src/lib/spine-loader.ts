@@ -1,4 +1,3 @@
-import * as spine34 from "@pixi-spine/runtime-3.4";
 import * as spine37 from "@pixi-spine/runtime-3.7";
 import * as spine38 from "@pixi-spine/runtime-3.8";
 import * as spine41 from "@pixi-spine/runtime-4.1";
@@ -19,8 +18,8 @@ export enum SPINE_VERSION {
 }
 
 const versionMap: Record<string, SPINE_VERSION> = {
-  "3.3": SPINE_VERSION.VER34,
-  "3.4": SPINE_VERSION.VER34,
+  "3.3": SPINE_VERSION.VER37,
+  "3.4": SPINE_VERSION.VER37,
   "3.7": SPINE_VERSION.VER37,
   "3.8": SPINE_VERSION.VER38,
   "4.0": SPINE_VERSION.VER40,
@@ -92,10 +91,6 @@ class UniBinaryParser implements ISkeletonParser {
     atlas: TextureAtlas,
   ): SkeletonBinaryParser | null {
     switch (ver) {
-      case SPINE_VERSION.VER34:
-        return new spine34.SkeletonBinary(
-          new spine34.AtlasAttachmentLoader(atlas),
-        ) as SkeletonBinaryParser;
       case SPINE_VERSION.VER38:
         return new spine38.SkeletonBinary(
           new spine38.AtlasAttachmentLoader(atlas),
