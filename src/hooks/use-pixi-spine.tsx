@@ -5,25 +5,29 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { toBlobURL } from "@ffmpeg/util";
 import { Handler, useGesture } from "@use-gesture/react";
 import { ReactDOMAttributes } from "@use-gesture/react/dist/declarations/src/types";
-import GIF from "gif.js";
+import GIFEncoder from "gif-encoder-2";
 import { ITrackEntry, SpineDebugRenderer, type Spine } from "pixi-spine";
 import * as PIXI from "pixi.js";
 
 type SpineWithDebug = Spine & { debug: SpineDebugRenderer | null };
-
 type Dimensions = { width: number; height: number; x: number; y: number };
 type Position = { x: number; y: number };
-type ExportOptions = { height?: number };
+type ExportOptions = {
+  height?: number;
+  onExportPercentageUpdate?: (percentage: string) => void;
+};
 type VideoFormat = "webm" | "mp4";
 
-const GIF_WORKER_URL = "/gif.worker.js";
 const MAX_GIF_HEIGHT = 1000;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 3;
 const ANIMATION_SMOOTHING = 0.1;
 const DEFAULT_SCALE_FACTOR = 0.8;
+const ffmpeg = new FFmpeg();
 
 export type UseSpine = {
   animationList: string[];
@@ -43,7 +47,7 @@ export type UseSpine = {
     format: VideoFormat,
     options?: ExportOptions,
   ) => Promise<void>;
-  exportToGif: (options?: ExportOptions) => Promise<void>;
+  exportToGif: (options?: ExportOptions) => void;
   isExporting: boolean;
 };
 
@@ -125,7 +129,6 @@ const useSpine = (spine: Spine | null): UseSpine => {
       const height = Math.min(targetHeight, MAX_GIF_HEIGHT);
       let width = Math.round(height * aspectRatio);
 
-      // Ensure width is even (for video encoding compatibility)
       if (originalWidth % 2 === 0 && width % 2 !== 0) {
         width = Math.abs(width - 1) < 2 ? width - 1 : width + 1;
       }
@@ -236,8 +239,13 @@ const useSpine = (spine: Spine | null): UseSpine => {
   /**
    * Sets up spine for export and ensures proper cleanup afterward
    */
-  const withExportSetup = useCallback(
-    async <T,>(callback: (spine: SpineWithDebug) => Promise<T>): Promise<T> => {
+  const withExportSetup: {
+    <T>(callback: (spine: SpineWithDebug) => Promise<T>): Promise<T>;
+    <T>(callback: (spine: SpineWithDebug) => T): T;
+  } = useCallback(
+    <T,>(
+      callback: (spine: SpineWithDebug) => Promise<T> | T,
+    ): Promise<T> | T => {
       const spine = spineAnimationRef.current;
       if (!spine) throw new Error("Spine is not available");
 
@@ -246,11 +254,7 @@ const useSpine = (spine: Spine | null): UseSpine => {
       const originalPosition = spine.position.clone();
       const originalTime = spine.state.tracks[0]?.trackTime ?? 0;
 
-      try {
-        setIsExporting(true);
-        if (!wasPaused) spine.state.timeScale = 0;
-        return await callback(spine);
-      } finally {
+      const cleanup = () => {
         spine.scale.copyFrom(originalScale);
         spine.position.copyFrom(originalPosition);
         if (spine.state.tracks[0]) {
@@ -258,6 +262,24 @@ const useSpine = (spine: Spine | null): UseSpine => {
         }
         if (!wasPaused) spine.state.timeScale = 1;
         setIsExporting(false);
+      };
+
+      setIsExporting(true);
+      if (!wasPaused) spine.state.timeScale = 0;
+
+      let result: Promise<T> | T;
+      try {
+        result = callback(spine);
+      } catch (error) {
+        cleanup();
+        throw error;
+      }
+
+      if (result instanceof Promise) {
+        return result.finally(cleanup);
+      } else {
+        cleanup();
+        return result;
       }
     },
     [],
@@ -568,43 +590,53 @@ const useSpine = (spine: Spine | null): UseSpine => {
       const spine = spineAnimationRef.current;
       if (!spine || !spine.state.tracks[0]) return;
 
+      // Declare frames in an outer scope so they can be cleaned up later.
+      let frames: ImageData[] = [];
+
       return withExportSetup(async (spine) => {
         const exportContainer = new PIXI.Container();
+        let renderer: PIXI.Renderer | null = null;
         try {
+          // Warn about MP4 transparency limitations
           if (format === "mp4") {
             console.warn(
               "MP4 format does not support transparency. Transparent areas will be rendered with an opaque background.",
             );
           }
 
+          // Calculate animation duration and frame count
           const trackEntry = spine.state.tracks[0];
           const duration = getAnimationDuration(trackEntry);
+          const FPS = 30;
+          const totalFrames = Math.floor(duration * FPS);
+          const frameDuration = duration / totalFrames; // precise frame timing
 
-          // Get animation bounds that includes all frames
+          // Calculate animation bounds and dimensions
           const maxBounds = calculateMaxAnimationBounds();
           const originalWidth = maxBounds.width;
           const originalHeight = maxBounds.height;
-
-          // Calculate target dimensions while maintaining aspect ratio
-          const { width, height } = calculateExportDimensions(
+          let { width, height } = calculateExportDimensions(
             originalWidth,
             originalHeight,
             options?.height,
           );
 
-          // Calculate scale based on target height
+          // Ensure exported dimensions are even (required by libx264)
+          width = Math.round(width / 2) * 2;
+          height = Math.round(height / 2) * 2;
+
+          // Set up scaling and padding based on even dimensions
           const scale = height / originalHeight;
           exportContainer.addChild(spine);
 
-          // Add slight padding to ensure animation stays in frame
           const paddingFactor = 0.05;
           const paddedWidth = Math.ceil(width * (1 + paddingFactor));
           const paddedHeight = Math.ceil(height * (1 + paddingFactor));
           const paddingX = Math.floor((paddedWidth - width) / 2);
           const paddingY = Math.floor((paddedHeight - height) / 2);
 
-          // Create a PIXI renderer with padding
-          const renderer = new PIXI.Renderer({
+          // Create PIXI renderer for full export (including padding)
+          renderer = new PIXI.Renderer({
             width: paddedWidth,
             height: paddedHeight,
             backgroundAlpha: 0,
@@ -612,136 +644,179 @@ const useSpine = (spine: Spine | null): UseSpine => {
             preserveDrawingBuffer: true,
           });
 
-          // Create canvas for rendering the final output (without padding)
-          const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          if (!ctx) {
-            throw new Error("Failed to create canvas context");
+          // Create temporary canvas for final frame extraction
+          const frameCanvas = document.createElement("canvas");
+          frameCanvas.width = width;
+          frameCanvas.height = height;
+          const frameCtx = frameCanvas.getContext("2d");
+          if (!frameCtx) {
+            throw new Error("Failed to create frame canvas context");
           }
 
-          // Set up video encoding
-          const FPS = 30;
-          const stream = canvas.captureStream(FPS);
-          const webmAlphaMime = "video/webm;codecs=vp9,alpha";
-          const mimeType =
-            format === "mp4"
-              ? "video/mp4;codecs=h264"
-              : MediaRecorder.isTypeSupported(webmAlphaMime)
-                ? webmAlphaMime
-                : "video/webm;codecs=vp9";
+          // Pre-render all frames
+          console.log(`Pre-rendering ${totalFrames} frames...`);
+          frames = [];
 
-          const recorder = new MediaRecorder(stream, {
-            mimeType: MediaRecorder.isTypeSupported(mimeType)
-              ? mimeType
-              : "video/webm",
-            videoBitsPerSecond: 5000000, // 5Mbps
-          });
+          for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+            const currentTime = Math.min(frameIndex * frameDuration, duration);
 
-          const chunks: Blob[] = [];
-          recorder.ondataavailable = (e) => chunks.push(e.data);
-
-          const recordingFinished = new Promise<void>((resolve) => {
-            recorder.onstop = () => {
-              const blob = new Blob(chunks, { type: recorder.mimeType });
-              const url = URL.createObjectURL(blob);
-
-              downloadFile(
-                url,
-                `${animationStateRef.current.currentAnimationName}.${format}`,
-              );
-              URL.revokeObjectURL(url);
-
-              resolve();
-            };
-          });
-
-          // Start recording
-          recorder.start();
-
-          const startTime = performance.now();
-          const animationDurationMs = duration * 1000;
-          let lastFrameTime = 0;
-
-          const renderFrame = () => {
-            const elapsed = Math.min(
-              performance.now() - startTime,
-              animationDurationMs,
-            );
-            const currentTime = (elapsed / animationDurationMs) * duration;
-
-            // Update animation state using precise elapsed time
+            // Update spine animation to the specific time
             spine.state.tracks[0].trackTime = currentTime;
             if (appRef.current) {
               appRef.current.ticker.update();
             }
 
-            // Calculate target frame time based on animation duration
-            const targetFrameTime = (elapsed / animationDurationMs) * duration;
+            // Position and scale the spine appropriately
+            spine.scale.set(scale, scale);
+            spine.position.set(
+              -maxBounds.x * scale + paddingX,
+              -maxBounds.y * scale + paddingY,
+            );
 
-            // Only capture frame if we've passed the required frame interval
-            if (targetFrameTime >= lastFrameTime + 1 / FPS) {
-              // Scale and position spine for export with padding
-              spine.scale.set(scale, scale);
-              spine.position.set(
-                -maxBounds.x * scale + paddingX,
-                -maxBounds.y * scale + paddingY,
-              );
+            // Render the current frame
+            renderer.clear();
+            renderer.render(exportContainer);
 
-              // Clear the renderer and render the frame
-              renderer.clear();
-              renderer.render(exportContainer);
+            // Copy the rendered area into the frame canvas (cropping out padding)
+            frameCtx.clearRect(0, 0, width, height);
+            frameCtx.drawImage(
+              renderer.view as CanvasImageSource,
+              paddingX,
+              paddingY,
+              width,
+              height,
+              0,
+              0,
+              width,
+              height,
+            );
 
-              // Clear the output canvas
-              ctx.clearRect(0, 0, width, height);
-
-              // Draw the rendered spine animation (cropped to remove padding)
-              ctx.drawImage(
-                renderer.view as HTMLCanvasElement,
-                paddingX,
-                paddingY,
-                width,
-                height,
-                0,
-                0,
-                width,
-                height,
-              );
-
-              // Update last captured frame time
-              lastFrameTime = targetFrameTime;
+            // Get the ImageData and verify its size
+            const frameData = frameCtx.getImageData(0, 0, width, height);
+            if (frameData.data.length !== width * height * 4) {
+              throw new Error(`Invalid frame data at index ${frameIndex}`);
             }
+            frames.push(frameData);
+          }
 
-            if (elapsed < animationDurationMs) {
-              requestAnimationFrame(renderFrame);
-            } else {
-              // Final frame to ensure complete duration
-              ctx.drawImage(
-                renderer.view as HTMLCanvasElement,
-                paddingX,
-                paddingY,
-                width,
-                height,
-                0,
-                0,
-                width,
-                height,
-              );
+          console.log(
+            `Pre-rendered ${frames.length} frames, starting video creation...`,
+          );
 
-              recorder.stop();
-              void recordingFinished.then(() => renderer.destroy());
+          // Load FFmpeg if not already loaded
+          const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+          if (!ffmpeg.loaded) {
+            await ffmpeg.load({
+              coreURL: await toBlobURL(
+                `${baseURL}/ffmpeg-core.js`,
+                "text/javascript",
+              ),
+              wasmURL: await toBlobURL(
+                `${baseURL}/ffmpeg-core.wasm`,
+                "application/wasm",
+              ),
+            });
+          }
+
+          // Write frames to FFmpeg's virtual filesystem using sequential, zero-based filenames
+          for (let i = 0; i < frames.length; i++) {
+            const canvas = document.createElement("canvas");
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Canvas context failed");
+
+            ctx.putImageData(frames[i], 0, 0);
+            const blob = await new Promise<Blob | null>((resolve) =>
+              canvas.toBlob(resolve, "image/png"),
+            );
+            if (!blob) throw new Error("Frame blob creation failed");
+
+            const buffer = await blob.arrayBuffer();
+            const filename = `frame${i.toString().padStart(4, "0")}.png`;
+            await ffmpeg.writeFile(filename, new Uint8Array(buffer));
+          }
+
+          // Build the FFmpeg command:
+          // - "-start_number 0": tells FFmpeg the first frame is frame0000.png.
+          // - "-frames:v": processes exactly the number of pre-rendered frames.
+          const outputFile = `output.${format}`;
+
+          const args = [
+            "-framerate",
+            String(FPS),
+            "-start_number",
+            "0",
+            "-i",
+            "frame%04d.png",
+            "-frames:v",
+            String(frames.length),
+            "-r",
+            String(FPS),
+            "-vsync",
+            "0",
+            "-c:v",
+            format === "mp4" ? "libx264" : "libvpx-vp9",
+            ...(format === "webm"
+              ? ["-lossless", "1", "-cpu-used", "4", "-tile-columns", "4"]
+              : []),
+            ...(format === "mp4" ? ["-preset", "medium", "-crf", "18"] : []),
+            "-pix_fmt",
+            format === "mp4" ? "yuv420p" : "yuva420p",
+            "-auto-alt-ref",
+            "0",
+            "-b:v",
+            "5M",
+            "-g",
+            String(FPS),
+            "-an",
+            "-progress",
+            "pipe:1",
+            outputFile,
+          ];
+
+          ffmpeg.on("progress", (event) => {
+            const progressPercent = Math.min(event.progress * 100, 100);
+            if (options?.onExportPercentageUpdate) {
+              options.onExportPercentageUpdate(progressPercent.toFixed(1));
             }
-          };
+          });
 
-          // Start rendering loop
-          renderFrame();
+          await ffmpeg.exec(args);
 
-          // Wait for recording to finish
-          await recordingFinished;
+          // Read the output file and create a downloadable blob
+          const data = await ffmpeg.readFile(outputFile);
+          const videoBlob = new Blob([data], {
+            type: format === "mp4" ? "video/mp4" : "video/webm",
+          });
+          const url = URL.createObjectURL(videoBlob);
+          downloadFile(
+            url,
+            `${animationStateRef.current.currentAnimationName}.${format}`,
+          );
+          URL.revokeObjectURL(url);
         } catch (error) {
           console.error(`Failed to export to ${format}:`, error);
         } finally {
+          // Clean up: delete each frame file individually from FFmpeg's virtual filesystem.
+          for (let i = 0; i < frames.length; i++) {
+            const filename = `frame${i.toString().padStart(4, "0")}.png`;
+            try {
+              await ffmpeg.deleteFile(filename);
+            } catch (deleteError) {
+              console.warn(`Failed to delete ${filename}:`, deleteError);
+            }
+          }
+          try {
+            await ffmpeg.deleteFile(`output.${format}`);
+          } catch (deleteError) {
+            console.warn(`Failed to delete output file:`, deleteError);
+          }
+          // Destroy the PIXI renderer to free up resources.
+          if (renderer) {
+            renderer.destroy();
+          }
+          // Return the spine to the main stage and destroy the export container.
           appRef.current?.stage.addChild(spine);
           exportContainer.destroy({ children: false });
         }
@@ -759,26 +834,24 @@ const useSpine = (spine: Spine | null): UseSpine => {
    * Exports the animation to a GIF file with proper transparency
    */
   const exportToGif = useCallback(
-    async (options?: ExportOptions): Promise<void> => {
+    (options?: ExportOptions): void => {
       const spine = spineAnimationRef.current;
       if (!spine || !spine.state.tracks[0]) return;
 
-      return await withExportSetup(async (spine) => {
+      return withExportSetup((spine) => {
         const exportContainer = new PIXI.Container();
         try {
           const trackEntry = spine.state.tracks[0];
           const duration = getAnimationDuration(trackEntry);
 
-          // Reduce frames to ensure GIF generation completes
+          // Define FPS and calculate total frames
           const FPS = 20;
           const totalFrames = Math.ceil(duration * FPS);
 
-          // Get max animation bounds
+          // Get max animation bounds and target dimensions
           const maxBounds = calculateMaxAnimationBounds();
           const originalWidth = maxBounds.width;
           const originalHeight = maxBounds.height;
-
-          // Calculate target dimensions and scale
           const { width, height } = calculateExportDimensions(
             originalWidth,
             originalHeight,
@@ -786,16 +859,17 @@ const useSpine = (spine: Spine | null): UseSpine => {
           );
           const scale = height / originalHeight;
 
+          // Prepare export container
           exportContainer.addChild(spine);
 
-          // Add padding to avoid clipping and provide buffer for edge processing
+          // Calculate padding to avoid clipping
           const paddingFactor = 0.05;
           const paddedWidth = Math.ceil(width * (1 + paddingFactor));
           const paddedHeight = Math.ceil(height * (1 + paddingFactor));
           const paddingX = Math.floor((paddedWidth - width) / 2);
           const paddingY = Math.floor((paddedHeight - height) / 2);
 
-          // Create temporary renderer
+          // Create a temporary PIXI renderer with a transparent background
           const renderer = new PIXI.Renderer({
             width: paddedWidth,
             height: paddedHeight,
@@ -804,50 +878,42 @@ const useSpine = (spine: Spine | null): UseSpine => {
             preserveDrawingBuffer: true,
           });
 
-          // Optimize GIF.js configuration
-          const gif = new GIF({
-            workers: 2, // Reduced from 4 to prevent memory issues
-            quality: 10,
-            width,
-            height,
-            workerScript: GIF_WORKER_URL,
-            transparent: "#00FF99",
-            // disposal: 2,
-            dither: false,
-            debug: true, // Enable debug to get more information
-          });
-
-          // Create a work canvas for frame processing
+          // Create an offscreen canvas for capturing frames
           const frameCanvas = document.createElement("canvas");
+          frameCanvas.width = width;
+          frameCanvas.height = height;
           const frameCtx = frameCanvas.getContext("2d", {
             willReadFrequently: true,
             alpha: true,
           })!;
-          frameCanvas.width = width;
-          frameCanvas.height = height;
 
-          // Prepare frames in smaller batches to avoid memory pressure
+          // Set up the GIF encoder (gif-encoder-2 handles transparency natively)
+          const encoder = new GIFEncoder(width, height, "neuquant", false);
+          encoder.setRepeat(0); // 0 = loop indefinitely
+          encoder.setDelay(1000 / FPS);
+          encoder.setQuality(1);
+          encoder.setTransparent();
+          encoder.start();
 
+          // Generate and add frames
           for (let i = 0; i < totalFrames; i++) {
             const time = (i / (totalFrames - 1)) * duration;
             spine.state.tracks[0].trackTime = time;
             spine.updateTransform();
 
-            // Scale and position spine with padding
+            // Scale and position the spine animation
             spine.scale.set(scale, scale);
             spine.position.set(
               -maxBounds.x * scale + paddingX,
               -maxBounds.y * scale + paddingY,
             );
 
-            // Clear renderer and render the frame
+            // Render current frame into the renderer
             renderer.clear();
             renderer.render(exportContainer);
 
-            // Clear canvas with transparency
+            // Draw the rendered frame onto the offscreen canvas
             frameCtx.clearRect(0, 0, width, height);
-
-            // Draw the rendered spine animation
             frameCtx.drawImage(
               renderer.view as HTMLCanvasElement,
               paddingX,
@@ -860,61 +926,36 @@ const useSpine = (spine: Spine | null): UseSpine => {
               height,
             );
 
-            // Process transparency
-            const imageData = frameCtx.getImageData(0, 0, width, height);
-            const data = imageData.data;
+            // Add the frame to the encoder
+            encoder.addFrame(frameCtx);
 
-            for (let j = 0; j < data.length; j += 4) {
-              const r = data[j];
-              const g = data[j + 1];
-              const b = data[j + 2];
-              const a = data[j + 3];
-
-              if (a === 0) continue;
-
-              if (a < 250) {
-                const avgColor = (r + b) / 2;
-                if (g > avgColor * 1.2) {
-                  data[j + 1] = Math.min(g, avgColor * 1.1);
-                }
-              }
-
-              const brightness = r * 0.299 + g * 0.587 + b * 0.114;
-              if (brightness < 30 && a < 240) {
-                data[j + 3] = 0;
-              }
+            const progressPercent = Math.min(
+              ((i + 1) / totalFrames) * 100,
+              100,
+            );
+            if (options?.onExportPercentageUpdate) {
+              options.onExportPercentageUpdate(progressPercent.toFixed(1));
             }
-
-            frameCtx.putImageData(imageData, 0, 0);
-
-            // Add the frame directly to avoid memory issues with image objects
-            gif.addFrame(frameCanvas, {
-              delay: 1000 / FPS,
-              copy: true,
-              dispose: 2,
-            });
           }
 
-          // Finalize GIF
-          await new Promise<void>((resolve) => {
-            gif.on("finished", (blob: Blob) => {
-              const url = URL.createObjectURL(blob);
-              downloadFile(
-                url,
-                `${animationStateRef.current.currentAnimationName}.gif`,
-              );
-              URL.revokeObjectURL(url);
-              resolve();
-            });
+          encoder.finish();
+          const binaryGif = encoder.out.getData();
+          const blob = new Blob([binaryGif], { type: "image/gif" });
+          const url = URL.createObjectURL(blob);
 
-            gif.render();
-          });
+          // Trigger file download
+          downloadFile(
+            url,
+            `${animationStateRef.current.currentAnimationName}.gif`,
+          );
+          URL.revokeObjectURL(url);
 
           renderer.destroy();
         } catch (error) {
           console.error("Error generating GIF:", error);
           throw new Error("Failed to generate GIF");
         } finally {
+          // Restore spine to its original container
           appRef.current?.stage.addChild(spine);
           exportContainer.destroy({ children: false });
         }
