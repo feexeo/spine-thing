@@ -109,9 +109,6 @@ importers:
       gif-encoder-2:
         specifier: ^1.0.5
         version: 1.0.5(patch_hash=zggmk2sin7jtlw6qwnw42kn6xi)
-      gif.js:
-        specifier: ^0.2.0
-        version: 0.2.0
       lucide-react:
         specifier: ^0.479.0
         version: 0.479.0(react@19.0.0)
@@ -1983,9 +1980,6 @@ packages:
 
   gif-encoder-2@1.0.5:
     resolution: {integrity: sha512-fsRAKbZuUoZ7FYGjpFElmflTkKwsn/CzAmL/xDl4558aTAgysIDCUF6AXWO8dmai/ApfZACbPVAM+vPezJXlFg==}
-
-  gif.js@0.2.0:
-    resolution: {integrity: sha512-bYxCoT8OZKmbxY8RN4qDiYuj4nrQDTzgLRcFVovyona1PTWNePzI4nzOmotnlOFIzTk/ZxAHtv+TfVLiBWj/hw==}
 
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
@@ -4512,8 +4506,6 @@ snapshots:
   get-stream@8.0.1: {}
 
   gif-encoder-2@1.0.5(patch_hash=zggmk2sin7jtlw6qwnw42kn6xi): {}
-
-  gif.js@0.2.0: {}
 
   glob-parent@5.1.2:
     dependencies:
