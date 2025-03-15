@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@9.15.3",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,14 +12,12 @@
     "prepare": "husky"
   },
   "dependencies": {
-    "@pixi-spine/base": "./local_modules/@pixi-spine/base",
-    "@pixi-spine/loader-base": "./local_modules/@pixi-spine/loader-base",
-    "@pixi-spine/loader-uni": "./local_modules/@pixi-spine/loader-uni",
-    "@pixi-spine/runtime-3.4": "./local_modules/@pixi-spine/runtime-3.4",
-    "@pixi-spine/runtime-3.7": "./local_modules/@pixi-spine/runtime-3.7",
-    "@pixi-spine/runtime-3.8": "./local_modules/@pixi-spine/runtime-3.8",
-    "@pixi-spine/runtime-4.0": "./local_modules/@pixi-spine/runtime-4.0",
-    "@pixi-spine/runtime-4.1": "./local_modules/@pixi-spine/runtime-4.1",
+    "@pixi-spine/base": "^4.0.3",
+    "@pixi-spine/loader-base": "^4.0.3",
+    "@pixi-spine/runtime-3.7": "^4.0.3",
+    "@pixi-spine/runtime-3.8": "^4.0.3",
+    "@pixi-spine/runtime-4.0": "^4.0.3",
+    "@pixi-spine/runtime-4.1": "^4.0.3",
     "@radix-ui/react-checkbox": "^1.1.4",
     "@radix-ui/react-dialog": "^1.1.6",
     "@radix-ui/react-label": "^2.1.2",
@@ -34,7 +33,7 @@
     "gif.js": "^0.2.0",
     "lucide-react": "^0.479.0",
     "next-themes": "^0.4.5",
-    "pixi-spine": "./local_modules/pixi-spine",
+    "pixi-spine": "^4.0.4",
     "pixi.js": "^7",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -120,5 +119,10 @@
       "",
       "^[./]"
     ]
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@pixi-spine/loader-base": "patches/@pixi-spine__loader-base.patch"
+    }
   }
 }
