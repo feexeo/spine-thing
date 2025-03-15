@@ -20,6 +20,9 @@ type SpineState = {
   premultipliedAlpha: boolean;
   urls: SpineUrls;
   files: SpineFiles;
+  customHeightEnabled: boolean;
+  exportHeight: string;
+  exportPercentage: string;
 
   setSpine: (spine: Spine | null) => void;
   setIsLoading: (isLoading: boolean) => void;
@@ -29,6 +32,9 @@ type SpineState = {
   setFiles: (files: Partial<SpineFiles>) => void;
   resetStore: () => void;
   loadSpineAnimation: () => Promise<void>;
+  setExportHeight: (height: string) => void;
+  setExportPercentage: (percentage: string) => void;
+  setCustomHeightEnabled: (value: boolean) => void;
 };
 
 export const useSpineStore = create<SpineState>((set, get) => ({
@@ -46,6 +52,9 @@ export const useSpineStore = create<SpineState>((set, get) => ({
     imageFile: null,
     jsonFile: null,
   },
+  customHeightEnabled: false,
+  exportHeight: "",
+  exportPercentage: "0.0",
   setSpine: (spine) => set({ spine }),
   setIsLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
@@ -64,6 +73,9 @@ export const useSpineStore = create<SpineState>((set, get) => ({
     set((state) => ({
       files: { ...state.files, ...Files },
     })),
+  setExportHeight: (exportHeight) => set({ exportHeight }),
+  setExportPercentage: (exportPercentage) => set({ exportPercentage }),
+  setCustomHeightEnabled: (customHeightEnabled) => set({ customHeightEnabled }),
   resetStore: () =>
     set({
       spine: null,

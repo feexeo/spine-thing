@@ -47,7 +47,7 @@ export type UseSpine = {
     format: VideoFormat,
     options?: ExportOptions,
   ) => Promise<void>;
-  exportToGif: (options?: ExportOptions) => void;
+  exportToGif: (options?: ExportOptions) => Promise<void>;
   isExporting: boolean;
 };
 
@@ -834,21 +834,17 @@ const useSpine = (spine: Spine | null): UseSpine => {
    * Exports the animation to a GIF file with proper transparency
    */
   const exportToGif = useCallback(
-    (options?: ExportOptions): void => {
+    async (options?: ExportOptions): Promise<void> => {
       const spine = spineAnimationRef.current;
       if (!spine || !spine.state.tracks[0]) return;
 
-      return withExportSetup((spine) => {
+      return withExportSetup(async (spine) => {
         const exportContainer = new PIXI.Container();
         try {
           const trackEntry = spine.state.tracks[0];
           const duration = getAnimationDuration(trackEntry);
-
-          // Define FPS and calculate total frames
           const FPS = 20;
           const totalFrames = Math.ceil(duration * FPS);
-
-          // Get max animation bounds and target dimensions
           const maxBounds = calculateMaxAnimationBounds();
           const originalWidth = maxBounds.width;
           const originalHeight = maxBounds.height;
@@ -858,18 +854,12 @@ const useSpine = (spine: Spine | null): UseSpine => {
             options?.height,
           );
           const scale = height / originalHeight;
-
-          // Prepare export container
           exportContainer.addChild(spine);
-
-          // Calculate padding to avoid clipping
           const paddingFactor = 0.05;
           const paddedWidth = Math.ceil(width * (1 + paddingFactor));
           const paddedHeight = Math.ceil(height * (1 + paddingFactor));
           const paddingX = Math.floor((paddedWidth - width) / 2);
           const paddingY = Math.floor((paddedHeight - height) / 2);
-
-          // Create a temporary PIXI renderer with a transparent background
           const renderer = new PIXI.Renderer({
             width: paddedWidth,
             height: paddedHeight,
@@ -877,8 +867,6 @@ const useSpine = (spine: Spine | null): UseSpine => {
             antialias: true,
             preserveDrawingBuffer: true,
           });
-
-          // Create an offscreen canvas for capturing frames
           const frameCanvas = document.createElement("canvas");
           frameCanvas.width = width;
           frameCanvas.height = height;
@@ -886,33 +874,25 @@ const useSpine = (spine: Spine | null): UseSpine => {
             willReadFrequently: true,
             alpha: true,
           })!;
-
-          // Set up the GIF encoder (gif-encoder-2 handles transparency natively)
           const encoder = new GIFEncoder(width, height, "neuquant", false);
-          encoder.setRepeat(0); // 0 = loop indefinitely
+          encoder.setRepeat(0);
           encoder.setDelay(1000 / FPS);
           encoder.setQuality(1);
           encoder.setTransparent();
           encoder.start();
 
-          // Generate and add frames
+          // Process frames in chunks
           for (let i = 0; i < totalFrames; i++) {
             const time = (i / (totalFrames - 1)) * duration;
             spine.state.tracks[0].trackTime = time;
             spine.updateTransform();
-
-            // Scale and position the spine animation
             spine.scale.set(scale, scale);
             spine.position.set(
               -maxBounds.x * scale + paddingX,
               -maxBounds.y * scale + paddingY,
             );
-
-            // Render current frame into the renderer
             renderer.clear();
             renderer.render(exportContainer);
-
-            // Draw the rendered frame onto the offscreen canvas
             frameCtx.clearRect(0, 0, width, height);
             frameCtx.drawImage(
               renderer.view as HTMLCanvasElement,
@@ -925,10 +905,9 @@ const useSpine = (spine: Spine | null): UseSpine => {
               width,
               height,
             );
-
-            // Add the frame to the encoder
             encoder.addFrame(frameCtx);
 
+            // Update progress
             const progressPercent = Math.min(
               ((i + 1) / totalFrames) * 100,
               100,
@@ -936,26 +915,25 @@ const useSpine = (spine: Spine | null): UseSpine => {
             if (options?.onExportPercentageUpdate) {
               options.onExportPercentageUpdate(progressPercent.toFixed(1));
             }
+
+            // Yield control so the UI can update
+            await new Promise((resolve) => requestAnimationFrame(resolve));
           }
 
           encoder.finish();
           const binaryGif = encoder.out.getData();
           const blob = new Blob([binaryGif], { type: "image/gif" });
           const url = URL.createObjectURL(blob);
-
-          // Trigger file download
           downloadFile(
             url,
             `${animationStateRef.current.currentAnimationName}.gif`,
           );
           URL.revokeObjectURL(url);
-
           renderer.destroy();
         } catch (error) {
           console.error("Error generating GIF:", error);
           throw new Error("Failed to generate GIF");
         } finally {
-          // Restore spine to its original container
           appRef.current?.stage.addChild(spine);
           exportContainer.destroy({ children: false });
         }
