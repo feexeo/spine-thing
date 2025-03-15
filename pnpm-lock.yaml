@@ -8,6 +8,9 @@ patchedDependencies:
   '@pixi-spine/loader-base':
     hash: 3oedwew2cl6w4ni3ftbh2u6uoe
     path: patches/@pixi-spine__loader-base.patch
+  gif-encoder-2:
+    hash: zggmk2sin7jtlw6qwnw42kn6xi
+    path: patches/gif-encoder-2.patch
 
 importers:
 
@@ -91,6 +94,9 @@ importers:
       cmdk:
         specifier: 1.0.0
         version: 1.0.0(@types/react-dom@19.0.4(@types/react@19.0.10))(@types/react@19.0.10)(react-dom@19.0.0(react@19.0.0))(react@19.0.0)
+      gif-encoder-2:
+        specifier: ^1.0.5
+        version: 1.0.5(patch_hash=zggmk2sin7jtlw6qwnw42kn6xi)
       gif.js:
         specifier: ^0.2.0
         version: 0.2.0
@@ -1946,6 +1952,9 @@ packages:
   get-stream@8.0.1:
     resolution: {integrity: sha512-VaUJspBffn/LMCJVoMvSAdmscJyS1auj5Zulnn5UoYcY531UWmdwhRWkcGKnGU93m5HSXP9LP2usOryrBtQowA==}
     engines: {node: '>=16'}
+
+  gif-encoder-2@1.0.5:
+    resolution: {integrity: sha512-fsRAKbZuUoZ7FYGjpFElmflTkKwsn/CzAmL/xDl4558aTAgysIDCUF6AXWO8dmai/ApfZACbPVAM+vPezJXlFg==}
 
   gif.js@0.2.0:
     resolution: {integrity: sha512-bYxCoT8OZKmbxY8RN4qDiYuj4nrQDTzgLRcFVovyona1PTWNePzI4nzOmotnlOFIzTk/ZxAHtv+TfVLiBWj/hw==}
@@ -4463,6 +4472,8 @@ snapshots:
       es-object-atoms: 1.1.1
 
   get-stream@8.0.1: {}
+
+  gif-encoder-2@1.0.5(patch_hash=zggmk2sin7jtlw6qwnw42kn6xi): {}
 
   gif.js@0.2.0: {}
 
