@@ -1,4 +1,5 @@
 import React from "react";
+import { useSpineStore } from "@/store/spine-store";
 import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -86,7 +87,7 @@ const Loading: React.FC<LoadingProps> = ({
         return renderSpinner();
     }
   };
-
+  const percentage = useSpineStore((state) => state.exportPercentage);
   return (
     <div
       className={cn(
@@ -114,6 +115,14 @@ const Loading: React.FC<LoadingProps> = ({
               )}
             >
               {message}
+            </p>
+            <p
+              className={cn(
+                "text-foreground font-medium",
+                sizeClasses[size].text,
+              )}
+            >
+              {`${percentage} %`}
             </p>
             <p
               className={cn(
