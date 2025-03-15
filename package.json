@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@7.32.0",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -12,6 +13,7 @@
   },
   "dependencies": {
     "@pixi-spine/base": "^4.0.3",
+    "@pixi-spine/loader-base": "^4.0.3",
     "@pixi-spine/runtime-3.7": "^4.0.3",
     "@pixi-spine/runtime-3.8": "^4.0.3",
     "@pixi-spine/runtime-4.0": "^4.0.3",
@@ -117,5 +119,10 @@
       "",
       "^[./]"
     ]
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "@pixi-spine/loader-base": "patches/@pixi-spine__loader-base.patch"
+    }
   }
 }
