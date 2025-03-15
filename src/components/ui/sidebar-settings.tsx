@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { startTransition, useState } from "react";
 import { useSpineStore } from "@/store/spine-store";
 import {
   BugIcon,
@@ -35,18 +35,20 @@ import { Separator } from "@/components/ui/separator";
 import { SpineControls } from "./app-sidebar";
 
 const SpineControlPanel: React.FC<SpineControls> = (controls) => {
-  const [height, setHeight] = useState<string>("");
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [customHeightEnabled, setCustomHeightEnabled] =
-    useState<boolean>(false);
-  const [open, setOpen] = useState<boolean>(false);
-  const [selectedAnimation, setSelectedAnimation] = useState<number>(0);
-
   const {
     spine,
     isLoading: isExporting,
     setIsLoading: setIsExporting,
+    customHeightEnabled,
+    setCustomHeightEnabled,
+    exportHeight: height,
+    setExportHeight: setHeight,
+    setExportPercentage,
   } = useSpineStore();
+
+  const [isPlaying, setIsPlaying] = useState<boolean>(true);
+  const [open, setOpen] = useState<boolean>(false);
+  const [selectedAnimation, setSelectedAnimation] = useState<number>(0);
 
   const isSpineLoaded = !!spine;
 
@@ -91,10 +93,19 @@ const SpineControlPanel: React.FC<SpineControls> = (controls) => {
     }
 
     try {
-      setIsExporting(true);
+      startTransition(() => {
+        setIsExporting(true);
+      });
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
       const options = customHeightEnabled
-        ? { height: parseInt(height) }
-        : undefined;
+        ? {
+            height: parseInt(height),
+            onExportPercentageUpdate: setExportPercentage,
+          }
+        : {
+            onExportPercentageUpdate: setExportPercentage,
+          };
 
       switch (format) {
         case "gif":
@@ -116,7 +127,9 @@ const SpineControlPanel: React.FC<SpineControls> = (controls) => {
         description: `Could not complete ${format === "screenshot" ? "screenshot" : `export as ${format.toUpperCase()}`}`,
       });
     } finally {
-      setIsExporting(false);
+      startTransition(() => {
+        setIsExporting(false);
+      });
     }
   };
 
